@@ -2,6 +2,7 @@
 import logging
 import json
 import os
+import re
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
@@ -33,6 +34,17 @@ ACTIVITY_LEVELS = {
     "High activity": 1.9
 }
 
+# Case-insensitive mappings for activity levels and goals
+ACTIVITY_MAPPING = {}
+for key in ACTIVITY_LEVELS.keys():
+    ACTIVITY_MAPPING[key.lower()] = key
+
+GOAL_MAPPING = {
+    "lose weight": "Lose weight",
+    "maintain weight": "Maintain weight",
+    "gain weight": "Gain weight"
+}
+
 # Initialize DeepSeek client if API key is available
 if DEEPSEEK_API_KEY and DEEPSEEK_API_KEY != "your_deepseek_api_key_here":
     from openai import OpenAI
@@ -41,44 +53,37 @@ else:
     client = None
     logger.warning("DeepSeek API key not configured. AI menu generation will be disabled.")
 
-async def generate_weekly_menu(user_data):
-    """Generate a weekly menu using DeepSeek AI"""
-    if not client:
-        return "AI menu generation is currently unavailable. Please configure the DeepSeek API key."
-    
-    prompt = f"""
-    Create a personalized weekly meal plan for a {user_data['age']}-year-old {user_data['gender'].lower()} 
-    with the following characteristics:
-    - Weight: {user_data['weight']} kg
-    - Height: {user_data['height']} cm
-    - Activity level: {user_data['activity']}
-    - Goal: {user_data['goal']}
-    - Daily calorie target: {user_data['calories']:.0f} calories
-    - BMR: {user_data['bmr']:.0f} calories
-    - TDEE: {user_data['tdee']:.0f} calories
-    
-    Please create a simple, practical weekly menu with breakfast, lunch, dinner, and optional snacks for each day.
-    Focus on common, affordable ingredients. Include portion sizes in grams or common measurements.
-    Format the response with clear day-by-day sections.
+def format_menu_as_plain_text(menu_text):
     """
+    Convert markdown-formatted menu to plain text with proper formatting for Telegram.
+    Removes markdown syntax while preserving structure.
+    """
+    if not menu_text:
+        return menu_text
     
-    try:
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": "You are a nutritionist expert specializing in creating practical meal plans."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=2000,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"Error generating menu with DeepSeek: {e}")
-        return "I apologize, but I'm having trouble generating your menu at the moment. Please try again later."
+    # Remove markdown headers
+    menu_text = re.sub(r'#+\s*', '', menu_text)
+    
+    # Convert bullet points to dashes
+    menu_text = re.sub(r'[*\-]\s+', '- ', menu_text)
+    
+    # Remove bold and italic formatting
+    menu_text = re.sub(r'\*\*(.*?)\*\*', r'\1', menu_text)
+    menu_text = re.sub(r'\*(.*?)\*', r'\1', menu_text)
+    menu_text = re.sub(r'_(.*?)_', r'\1', menu_text)
+    
+    # Ensure proper line breaks
+    menu_text = re.sub(r'\n\s*\n', '\n\n', menu_text)
+    
+    # Add emojis for better visual structure
+    menu_text = re.sub(r'(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)', 
+                      r'🗓️ \1', menu_text, flags=re.IGNORECASE)
+    menu_text = re.sub(r'(Breakfast|Lunch|Dinner|Snack)', 
+                      r'🍽️ \1', menu_text, flags=re.IGNORECASE)
+    
+    return menu_text
 
-# Start command
+# Define all handler functions first
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.message.from_user
     await update.message.reply_text(
@@ -101,8 +106,373 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return GENDER
 
-# [Rest of your functions remain the same as in the previous implementation]
-# ...
+async def gender(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    gender_input = update.message.text.strip().lower()
+    
+    # Validate input
+    if gender_input not in ['male', 'female']:
+        await update.message.reply_text(
+            'Please enter a valid gender. Type "Male" or "Female":'
+        )
+        return GENDER
+    
+    context.user_data['gender'] = gender_input.capitalize()
+    logger.info("Gender of %s: %s", user.first_name, context.user_data['gender'])
+    
+    await update.message.reply_text(
+        'Great! Now please enter your age:',
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return AGE
+
+async def age(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    try:
+        age = int(update.message.text)
+        if age < 1 or age > 120:
+            await update.message.reply_text('Please enter a valid age between 1 and 120:')
+            return AGE
+        context.user_data['age'] = age
+        logger.info("Age of %s: %s", user.first_name, age)
+        
+        await update.message.reply_text('Now please enter your weight in kg:')
+        return WEIGHT
+    except ValueError:
+        await update.message.reply_text('Please enter a valid number for your age:')
+        return AGE
+
+async def weight(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    try:
+        weight = float(update.message.text)
+        if weight < 1 or weight > 300:
+            await update.message.reply_text('Please enter a valid weight between 1 and 300 kg:')
+            return WEIGHT
+        context.user_data['weight'] = weight
+        logger.info("Weight of %s: %s kg", user.first_name, weight)
+        
+        await update.message.reply_text('Now please enter your height in cm:')
+        return HEIGHT
+    except ValueError:
+        await update.message.reply_text('Please enter a valid number for your weight:')
+        return WEIGHT
+
+async def height(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    try:
+        height = float(update.message.text)
+        if height < 30 or height > 250:
+            await update.message.reply_text('Please enter a valid height between 30 and 250 cm:')
+            return HEIGHT
+        context.user_data['height'] = height
+        logger.info("Height of %s: %s cm", user.first_name, height)
+        
+        # Ask for activity level with both buttons and text instructions
+        activity_options = list(ACTIVITY_LEVELS.keys())
+        reply_keyboard = [[option] for option in activity_options]  # One button per row
+        
+        activity_instructions = "\n".join([f"- {option}" for option in activity_options])
+        
+        await update.message.reply_text(
+            f'Please select your activity level:\n\n'
+            f'If you don\'t see buttons, please type one of these options (case insensitive):\n{activity_instructions}',
+            reply_markup=ReplyKeyboardMarkup(
+                reply_keyboard, 
+                one_time_keyboard=True,
+                resize_keyboard=True
+            ),
+        )
+        return ACTIVITY
+    except ValueError:
+        await update.message.reply_text('Please enter a valid number for your height:')
+        return HEIGHT
+
+async def activity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    activity_input = update.message.text.strip().lower()
+    
+    # Validate input using case-insensitive mapping
+    if activity_input not in ACTIVITY_MAPPING:
+        activity_options = list(ACTIVITY_LEVELS.keys())
+        activity_instructions = "\n".join([f"- {option}" for option in activity_options])
+        
+        await update.message.reply_text(
+            f'Please select a valid activity level from these options (case insensitive):\n{activity_instructions}'
+        )
+        return ACTIVITY
+        
+    # Map to the correct case version
+    context.user_data['activity'] = ACTIVITY_MAPPING[activity_input]
+    logger.info("Activity level of %s: %s", user.first_name, context.user_data['activity'])
+    
+    # Ask for goal with both buttons and text instructions
+    goal_options = ['Lose weight', 'Maintain weight', 'Gain weight']
+    reply_keyboard = [goal_options]  # All buttons in one row
+    
+    await update.message.reply_text(
+        'What is your goal?\n\n'
+        'If you don\'t see buttons, please type one of these options (case insensitive):\n'
+        '- Lose weight\n- Maintain weight\n- Gain weight',
+        reply_markup=ReplyKeyboardMarkup(
+            reply_keyboard, 
+            one_time_keyboard=True,
+            resize_keyboard=True
+        ),
+    )
+    return GOAL
+
+async def goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    goal_input = update.message.text.strip().lower()
+    
+    # Validate input using case-insensitive mapping
+    if goal_input not in GOAL_MAPPING:
+        await update.message.reply_text(
+            'Please select a valid goal. Type one of these options (case insensitive):\n'
+            '- Lose weight\n- Maintain weight\n- Gain weight'
+        )
+        return GOAL
+        
+    # Map to the correct case version
+    context.user_data['goal'] = GOAL_MAPPING[goal_input]
+    logger.info("Goal of %s: %s", user.first_name, context.user_data['goal'])
+    
+    # Calculate BMR
+    weight = context.user_data['weight']
+    height = context.user_data['height']
+    age = context.user_data['age']
+    
+    if context.user_data['gender'] == 'Male':
+        bmr = 10 * weight + 6.25 * height - 5 * age + 5
+    else:
+        bmr = 10 * weight + 6.25 * height - 5 * age - 161
+    
+    # Apply activity multiplier
+    activity_multiplier = ACTIVITY_LEVELS[context.user_data['activity']]
+    tdee = bmr * activity_multiplier
+    
+    # Adjust based on goal
+    if context.user_data['goal'] == 'Lose weight':
+        calories = tdee - 500  # Create deficit for weight loss
+    elif context.user_data['goal'] == 'Gain weight':
+        calories = tdee + 500  # Create surplus for weight gain
+    else:
+        calories = tdee  # Maintain weight
+    
+    context.user_data['bmr'] = bmr
+    context.user_data['tdee'] = tdee
+    context.user_data['calories'] = calories
+    
+    # Display results
+    await update.message.reply_text(
+        f"✅ Your data has been recorded:\n\n"
+        f"Gender: {context.user_data['gender']}\n"
+        f"Age: {context.user_data['age']} years\n"
+        f"Weight: {context.user_data['weight']} kg\n"
+        f"Height: {context.user_data['height']} cm\n"
+        f"Activity level: {context.user_data['activity']}\n"
+        f"Goal: {context.user_data['goal']}\n\n"
+        f"📊 Calculation Results:\n"
+        f"BMR (Basal Metabolic Rate): {bmr:.0f} calories\n"
+        f"TDEE (Total Daily Energy Expenditure): {tdee:.0f} calories\n"
+        f"Recommended daily intake: {calories:.0f} calories\n\n"
+        "Would you like me to generate a personalized weekly menu? (Yes/No - case insensitive)",
+        reply_markup=ReplyKeyboardMarkup(
+            [['Yes', 'No']],
+            one_time_keyboard=True,
+            resize_keyboard=True
+        ),
+    )
+    
+    return MENU_CONFIRM
+
+async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    response = update.message.text.strip().lower()
+    
+    # Case-insensitive handling for Yes/No
+    if response in ['yes', 'y']:
+        await update.message.reply_text(
+            "Great! I'm generating your personalized weekly menu. This may take a moment...",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        
+        # Generate weekly menu using AI
+        weekly_menu = await generate_weekly_menu(context.user_data)
+        
+        if weekly_menu:
+            # Split long message into parts if needed (Telegram has a message length limit)
+            if len(weekly_menu) > 4000:
+                parts = [weekly_menu[i:i+4000] for i in range(0, len(weekly_menu), 4000)]
+                for part in parts:
+                    await update.message.reply_text(part)
+            else:
+                await update.message.reply_text(weekly_menu)
+        else:
+            await update.message.reply_text(
+                "I apologize, but I'm having trouble generating your menu at the moment. "
+                "Please try again later or contact support if the issue persists."
+            )
+    elif response in ['no', 'n']:
+        await update.message.reply_text(
+            "No problem! You can always generate a weekly menu later using the /weekly_menu command. "
+            "Type /start anytime to update your information or calculate again.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        await update.message.reply_text(
+            "Please respond with 'Yes' or 'No' (case insensitive):",
+            reply_markup=ReplyKeyboardMarkup(
+                [['Yes', 'No']],
+                one_time_keyboard=True,
+                resize_keyboard=True
+            ),
+        )
+        return MENU_CONFIRM
+    
+    return ConversationHandler.END
+
+async def generate_weekly_menu(user_data):
+    """Generate a weekly menu using DeepSeek AI with plain text formatting"""
+    if not client:
+        return "AI menu generation is currently unavailable. Please configure the DeepSeek API key."
+    
+    prompt = f"""
+    Create a personalized weekly meal plan for a {user_data['age']}-year-old {user_data['gender'].lower()} 
+    with the following characteristics:
+    - Weight: {user_data['weight']} kg
+    - Height: {user_data['height']} cm
+    - Activity level: {user_data['activity']}
+    - Goal: {user_data['goal']}
+    - Daily calorie target: {user_data['calories']:.0f} calories
+    - BMR: {user_data['bmr']:.0f} calories
+    - TDEE: {user_data['tdee']:.0f} calories
+    
+    Please create a simple, practical weekly menu with breakfast, lunch, dinner, and optional snacks for each day.
+    Focus on common, affordable ingredients. Include portion sizes in grams or common measurements.
+    
+    IMPORTANT: Format the response as plain text (no markdown). Use clear section headers like:
+    
+    Monday
+    Breakfast: 
+    - Oatmeal: 200g
+    - Cheese: 50g
+    - Rye bread: 30g (1-2 pieces)
+    - Cup of juice
+    
+    Lunch:
+    - Grilled chicken: 150g
+    - Brown rice: 100g
+    - Steamed vegetables: 200g
+    
+    And so on for each day of the week.
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "You are a nutritionist expert specializing in creating practical meal plans. Always respond with plain text formatting (no markdown)."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        
+        # Format the menu as plain text
+        menu_text = response.choices[0].message.content
+        return format_menu_as_plain_text(menu_text)
+        
+    except Exception as e:
+        logger.error(f"Error generating menu with DeepSeek: {e}")
+        return "I apologize, but I'm having trouble generating your menu at the moment. Please try again later."
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
+    await update.message.reply_text(
+        'Bye! I hope we can talk again some day.', 
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return ConversationHandler.END
+
+async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if 'calories' not in context.user_data:
+        await update.message.reply_text(
+            "Please provide your body data first using /start"
+        )
+        return
+    
+    calories = context.user_data['calories']
+    goal = context.user_data['goal']
+    
+    # Simple diet plan generation based on calories and goal
+    protein_percentage = 0.3 if goal == 'Lose weight' else 0.25
+    carb_percentage = 0.4 if goal == 'Gain weight' else 0.35
+    fat_percentage = 0.3 if goal == 'Lose weight' else 0.4
+    
+    protein_cal = protein_percentage * calories
+    carb_cal = carb_percentage * calories
+    fat_cal = fat_percentage * calories
+    
+    protein_grams = protein_cal / 4
+    carb_grams = carb_cal / 4
+    fat_grams = fat_cal / 9
+    
+    # Sample meal plan
+    await update.message.reply_text(
+        f"🍽️ Your Personalized Diet Plan ({calories:.0f} calories)\n\n"
+        f"Macronutrient Distribution:\n"
+        f"Protein: {protein_grams:.0f}g ({protein_percentage*100:.0f}%)\n"
+        f"Carbs: {carb_grams:.0f}g ({carb_percentage*100:.0f}%)\n"
+        f"Fats: {fat_grams:.0f}g ({fat_percentage*100:.0f}%)\n\n"
+        f"Sample Meal Plan:\n"
+        f"Breakfast: {calories*0.25:.0f} calories\n"
+        f"Lunch: {calories*0.35:.0f} calories\n"
+        f"Dinner: {calories*0.30:.0f} calories\n"
+        f"Snack: {calories*0.10:.0f} calories\n\n"
+        "Would you like me to generate a detailed weekly menu? (Yes/No - case insensitive)",
+        reply_markup=ReplyKeyboardMarkup(
+            [['Yes', 'No']],
+            one_time_keyboard=True,
+            resize_keyboard=True
+        ),
+    )
+    
+    return MENU_CONFIRM
+
+async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if 'calories' not in context.user_data:
+        await update.message.reply_text(
+            "Please provide your body data first using /start"
+        )
+        return
+    
+    await update.message.reply_text(
+        "I'm generating your personalized weekly menu. This may take a moment...",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    
+    # Generate weekly menu using AI
+    weekly_menu = await generate_weekly_menu(context.user_data)
+    
+    if weekly_menu:
+        # Split long message into parts if needed
+        if len(weekly_menu) > 4000:
+            parts = [weekly_menu[i:i+4000] for i in range(0, len(weekly_menu), 4000)]
+            for part in parts:
+                await update.message.reply_text(part)
+        else:
+            await update.message.reply_text(weekly_menu)
+    else:
+        await update.message.reply_text(
+            "I apologize, but I'm having trouble generating your menu at the moment. "
+            "Please try again later or contact support if the issue persists."
+        )
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Exception while handling an update:", exc_info=context.error)
 
 # Main function
 def main() -> None:
@@ -119,7 +489,7 @@ def main() -> None:
             HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, height)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, activity)],
             GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, goal)],
-            MENU_CONFIRM: [MessageHandler(filters.Regex('^(Yes|No)$'), menu_confirmation)],
+            MENU_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_confirmation)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )

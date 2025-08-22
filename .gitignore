@@ -21,6 +21,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+AI Menu bot ideas.txt
 
 # Config files
 config.py

@@ -11,7 +11,7 @@ from telegram.ext import (
 
 # Import configuration
 try:
-    from config import HTTP_API_BOT_TOKEN, DEEPSEEK_API_KEY
+    from config import HTTP_API_BOT_TOKEN, DEEPSEEK_API_KEY, BOT_ADMINS
 except ImportError:
     logging.error("Config file not found. Please create config.py with your bot token.")
     exit(1)
@@ -45,6 +45,9 @@ GOAL_MAPPING = {
     "gain weight": "Gain weight"
 }
 
+# Simple in-memory user data storage (in a real app, use a database)
+user_data_store = {}
+
 # Initialize DeepSeek client if API key is available
 if DEEPSEEK_API_KEY and DEEPSEEK_API_KEY != "your_deepseek_api_key_here":
     from openai import OpenAI
@@ -53,7 +56,14 @@ else:
     client = None
     logger.warning("DeepSeek API key not configured. AI menu generation will be disabled.")
 
-# ******* ADMIN functions ******* 
+# Admin functionality
+def is_admin(user_id: int) -> bool:
+    """Check if a user is in the admin list"""
+    try:
+        from config import BOT_ADMINS
+        return user_id in BOT_ADMINS
+    except (ImportError, AttributeError):
+        return False
 
 def admin_required(func):
     """Decorator to check if user is admin before executing command"""
@@ -65,15 +75,69 @@ def admin_required(func):
         return await func(update, context, *args, **kwargs)
     return wrapped
 
-# Check if admin
-def is_admin(user_id: int) -> bool:
-    """Check if a user is in the admin list"""
+@admin_required
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display bot usage statistics (admin only)"""
+    # Example statistics - in a real implementation, you would track these
+    stats_message = (
+        "📊 Bot Statistics:\n\n"
+        f"Total Users: {len(user_data_store)}\n"
+        "Active Today: 23\n"
+        "Menus Generated: 287\n"
+        "Most Popular Goal: Weight Loss (65%)\n"
+        "Average Calories: 1950 kcal"
+    )
+    
+    await update.message.reply_text(stats_message)
+
+@admin_required
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message to all users (admin only)"""
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+    
+    message = " ".join(context.args)
+    
+    # In a real implementation, you would iterate through your user database
+    # For now, we'll just confirm the command works
+    await update.message.reply_text(
+        f"📢 Broadcast message prepared:\n\n{message}\n\n"
+        f"(In a full implementation, this would be sent to all {len(user_data_store)} users)"
+    )
+
+@admin_required
+async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Get information about a specific user (admin only)"""
+    if not context.args:
+        await update.message.reply_text("Usage: /userinfo <user_id>")
+        return
+    
     try:
-        from config import BOT_ADMINS
-        return user_id in BOT_ADMINS
-    except (ImportError, AttributeError):
-        # If BOT_ADMINS is not configured, return False
-        return False
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+    
+    # Check if user exists in our data store
+    if target_user_id in user_data_store:
+        user_data = user_data_store[target_user_id]
+        user_info_msg = (
+            f"👤 User Information for ID {target_user_id}:\n\n"
+            f"Gender: {user_data.get('gender', 'N/A')}\n"
+            f"Age: {user_data.get('age', 'N/A')}\n"
+            f"Weight: {user_data.get('weight', 'N/A')} kg\n"
+            f"Height: {user_data.get('height', 'N/A')} cm\n"
+            f"Activity: {user_data.get('activity', 'N/A')}\n"
+            f"Goal: {user_data.get('goal', 'N/A')}\n"
+            f"Calories: {user_data.get('calories', 'N/A')} kcal\n"
+            f"BMR: {user_data.get('bmr', 'N/A')}\n"
+            f"TDEE: {user_data.get('tdee', 'N/A')}"
+        )
+    else:
+        user_info_msg = f"User with ID {target_user_id} not found in the database."
+    
+    await update.message.reply_text(user_info_msg)
 
 @admin_required
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -87,82 +151,6 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     /admin_help - Show this help message
     """
     await update.message.reply_text(help_text)
-
-# Admin statistics
-@admin_required
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display bot usage statistics (admin only)"""
-    user_id = update.message.from_user.id
-    
-    if not is_admin(user_id):
-        await update.message.reply_text("❌ This command is for administrators only.")
-        return
-    
-    # Example statistics - you would track these in your database
-    stats_message = (
-        "📊 Bot Statistics:\n\n"
-        "Total Users: 150\n"
-        "Active Today: 23\n"
-        "Menus Generated: 287\n"
-        "Most Popular Goal: Weight Loss (65%)\n"
-        "Average Calories: 1950 kcal"
-    )
-    
-    await update.message.reply_text(stats_message)
-
-# Broadcast Message to bot users
-@admin_required
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message to all users (admin only)"""
-    user_id = update.message.from_user.id
-    
-    if not is_admin(user_id):
-        await update.message.reply_text("❌ This command is for administrators only.")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Usage: /broadcast <message>")
-        return
-    
-    message = " ".join(context.args)
-    
-    # In a real implementation, you would iterate through your user database
-    # For now, we'll just confirm the command works
-    await update.message.reply_text(
-        f"📢 Broadcast message prepared:\n\n{message}\n\n"
-        f"(In a full implementation, this would be sent to all users)"
-    )
-
-# User management by admin
-@admin_required
-async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Get information about a specific user (admin only)"""
-    user_id = update.message.from_user.id
-    
-    if not is_admin(user_id):
-        await update.message.reply_text("❌ This command is for administrators only.")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Usage: /userinfo <user_id>")
-        return
-    
-    target_user_id = int(context.args[0])
-    
-    # Simulate getting user info from database
-    user_info_msg = (
-        f"👤 User Information for ID {target_user_id}:\n\n"
-        f"First Seen: 2023-10-15\n"
-        f"Last Active: 2023-11-05\n"
-        f"Calculations Done: 8\n"
-        f"Menus Generated: 3\n"
-        f"Current Goal: Lose Weight\n"
-        f"Target Calories: 1800 kcal"
-    )
-    
-    await update.message.reply_text(user_info_msg)
-
-
 
 def format_menu_as_plain_text(menu_text):
     """
@@ -197,25 +185,47 @@ def format_menu_as_plain_text(menu_text):
 # Define all handler functions first
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.message.from_user
-    await update.message.reply_text(
-        f"Welcome {user.first_name} to the Nutrition Bot! 🍎\n\n"
-        "I will help you calculate your daily caloric needs and generate a personalized diet plan.\n\n"
-        "To get started, please provide some basic information about yourself.\n\n"
-        "Type /cancel at any time to stop our conversation."
-    )
+    user_id = user.id
     
-    # Ask for gender with both buttons and text instructions
-    reply_keyboard = [['Male', 'Female']]
-    await update.message.reply_text(
-        'Please select your gender:\n\n'
-        'If you don\'t see buttons, please type: "Male" or "Female"',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard, 
-            one_time_keyboard=True,
-            resize_keyboard=True
-        ),
-    )
-    return GENDER
+    # Check if user already has stored data
+    has_previous_data = user_id in user_data_store and user_data_store[user_id].get('calories')
+    
+    if has_previous_data:
+        # User has previous data - show options to generate menu or update info
+        reply_keyboard = [['Generate New Menu', 'Update My Information']]
+        await update.message.reply_text(
+            f"Welcome back {user.first_name}! 👋\n\n"
+            "I see you've already provided your information before.\n\n"
+            "Would you like to generate a new menu with your existing data "
+            "or update your information?",
+            reply_markup=ReplyKeyboardMarkup(
+                reply_keyboard, 
+                one_time_keyboard=True,
+                resize_keyboard=True
+            ),
+        )
+        return MENU_CONFIRM
+    else:
+        # New user or no previous data
+        await update.message.reply_text(
+            f"Welcome {user.first_name} to the Nutrition Bot! 🍎\n\n"
+            "I will help you calculate your daily caloric needs and generate a personalized diet plan.\n\n"
+            "To get started, please provide some basic information about yourself.\n\n"
+            "Type /cancel at any time to stop our conversation."
+        )
+        
+        # Ask for gender with both buttons and text instructions
+        reply_keyboard = [['Male', 'Female']]
+        await update.message.reply_text(
+            'Please select your gender:\n\n'
+            'If you don\'t see buttons, please type: "Male" or "Female"',
+            reply_markup=ReplyKeyboardMarkup(
+                reply_keyboard, 
+                one_time_keyboard=True,
+                resize_keyboard=True
+            ),
+        )
+        return GENDER
 
 async def gender(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.message.from_user
@@ -375,6 +385,10 @@ async def goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['tdee'] = tdee
     context.user_data['calories'] = calories
     
+    # Store user data for future use
+    user_id = user.id
+    user_data_store[user_id] = context.user_data.copy()
+    
     # Display results
     await update.message.reply_text(
         f"✅ Your data has been recorded:\n\n"
@@ -402,8 +416,8 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user = update.message.from_user
     response = update.message.text.strip().lower()
     
-    # Case-insensitive handling for Yes/No
-    if response in ['yes', 'y']:
+    # Handle different response types
+    if response in ['yes', 'y', 'generate new menu']:
         await update.message.reply_text(
             "Great! I'm generating your personalized weekly menu. This may take a moment...",
             reply_markup=ReplyKeyboardRemove()
@@ -420,17 +434,44 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     await update.message.reply_text(part)
             else:
                 await update.message.reply_text(weekly_menu)
+            
+            # Offer to generate another menu or update information
+            reply_keyboard = [['Generate Another Menu', 'Update My Information']]
+            await update.message.reply_text(
+                "What would you like to do next?",
+                reply_markup=ReplyKeyboardMarkup(
+                    reply_keyboard, 
+                    one_time_keyboard=True,
+                    resize_keyboard=True
+                ),
+            )
+            return MENU_CONFIRM
         else:
             await update.message.reply_text(
                 "I apologize, but I'm having trouble generating your menu at the moment. "
-                "Please try again later or contact support if the issue persists."
+                "Please try again later or contact support if the issue persists.",
+                reply_markup=ReplyKeyboardRemove()
             )
-    elif response in ['no', 'n']:
+            return ConversationHandler.END
+            
+    elif response in ['no', 'n', 'update my information']:
         await update.message.reply_text(
-            "No problem! You can always generate a weekly menu later using the /weekly_menu command. "
-            "Type /start anytime to update your information or calculate again.",
+            "No problem! Let's update your information.",
             reply_markup=ReplyKeyboardRemove()
         )
+        
+        # Ask for gender to start the update process
+        reply_keyboard = [['Male', 'Female']]
+        await update.message.reply_text(
+            'Please select your gender:\n\n'
+            'If you don\'t see buttons, please type: "Male" or "Female"',
+            reply_markup=ReplyKeyboardMarkup(
+                reply_keyboard, 
+                one_time_keyboard=True,
+                resize_keyboard=True
+            ),
+        )
+        return GENDER
     else:
         await update.message.reply_text(
             "Please respond with 'Yes' or 'No' (case insensitive):",
@@ -441,8 +482,6 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ),
         )
         return MENU_CONFIRM
-    
-    return ConversationHandler.END
 
 async def generate_weekly_menu(user_data):
     """Generate a weekly menu using DeepSeek AI with plain text formatting"""
@@ -461,7 +500,7 @@ async def generate_weekly_menu(user_data):
     - TDEE: {user_data['tdee']:.0f} calories
     
     Please create a simple, practical weekly menu with breakfast, lunch, dinner, and optional snacks for each day.
-    Focus on common, affordable, prefferably European ingredients. Include portion sizes in grams or common measurements.
+    Focus on common, affordable ingredients. Include portion sizes in grams or common measurements.
     
     IMPORTANT: Format the response as plain text (no markdown). Use clear section headers like:
     
@@ -509,12 +548,17 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if 'calories' not in context.user_data:
+    user_id = update.message.from_user.id
+    
+    # Check if user has existing data
+    if user_id not in user_data_store or 'calories' not in user_data_store[user_id]:
         await update.message.reply_text(
             "Please provide your body data first using /start"
         )
         return
     
+    # Use stored data
+    context.user_data.update(user_data_store[user_id])
     calories = context.user_data['calories']
     goal = context.user_data['goal']
     
@@ -535,7 +579,7 @@ async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         f"🍽️ Your Personalized Diet Plan ({calories:.0f} calories)\n\n"
         f"Macronutrient Distribution:\n"
-        f"Protein: {protein_grams:.0f}g ({protein_percentage*100:.0f}%)\n"
+        f"Protein: {protein_grams:.0极g ({protein_percentage*100:.0f}%)\n"
         f"Carbs: {carb_grams:.0f}g ({carb_percentage*100:.0f}%)\n"
         f"Fats: {fat_grams:.0f}g ({fat_percentage*100:.0f}%)\n\n"
         f"Sample Meal Plan:\n"
@@ -554,11 +598,17 @@ async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     return MENU_CONFIRM
 
 async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if 'calories' not in context.user_data:
+    user_id = update.message.from_user.id
+    
+    # Check if user has existing data
+    if user_id not in user_data_store or 'calories' not in user_data_store[user_id]:
         await update.message.reply_text(
             "Please provide your body data first using /start"
         )
         return
+    
+    # Use stored data
+    context.user_data.update(user_data_store[user_id])
     
     await update.message.reply_text(
         "I'm generating your personalized weekly menu. This may take a moment...",
@@ -576,11 +626,31 @@ async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await update.message.reply_text(part)
         else:
             await update.message.reply_text(weekly_menu)
+            
+        # Offer to generate another menu or update information
+        reply_keyboard = [['Generate Another Menu', 'Update My Information']]
+        await update.message.reply_text(
+            "What would you like to do next?",
+            reply_markup=ReplyKeyboardMarkup(
+                reply_keyboard, 
+                one_time_keyboard=True,
+                resize_keyboard=True
+            ),
+        )
     else:
         await update.message.reply_text(
             "I apologize, but I'm having trouble generating your menu at the moment. "
             "Please try again later or contact support if the issue persists."
         )
+
+async def clear_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear stored user data"""
+    user_id = update.message.from_user.id
+    if user_id in user_data_store:
+        del user_data_store[user_id]
+        await update.message.reply_text("Your stored data has been cleared. Use /start to begin again.")
+    else:
+        await update.message.reply_text("No stored data found for your account.")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Exception while handling an update:", exc_info=context.error)
@@ -596,7 +666,7 @@ def main() -> None:
         states={
             GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, gender)],
             AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, age)],
-            WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, weight)],
+            WEIGHT: [MessageHandler(filters.TEXT & ~极ilters.COMMAND, weight)],
             HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, height)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, activity)],
             GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, goal)],
@@ -607,8 +677,10 @@ def main() -> None:
 
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('diet', generate_diet))
-    application.add_handler(CommandHandler('weekly_menu', weekly_menu)) 
-    # Admin command handlers
+    application.add_handler(CommandHandler('weekly_menu', weekly_menu))
+    application.add_handler(CommandHandler('clear_data', clear_data))
+    
+    # Add admin command handlers
     application.add_handler(CommandHandler('stats', admin_stats))
     application.add_handler(CommandHandler('broadcast', broadcast))
     application.add_handler(CommandHandler('userinfo', user_info))

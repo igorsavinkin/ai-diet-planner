@@ -2,7 +2,28 @@
 
 A comprehensive Telegram bot that helps users calculate their daily caloric needs and generate personalized diet plans using AI-powered menu generation. Now with enhanced user experience and administrative features.
 
-## Features
+## Main Menu
+
+- [1. Features](#features)
+- [2. Extra Features & Improvements](#extra-features-improvements)
+- [3. Prerequisites](#prerequisites)
+- [4. Installation](#installation)
+- [5. Usage](#usage)
+- [6. Enhanced Usage Flow](#enhanced-usage-flow)
+- [7. Commands](#commands)
+- [8. Project Structure](#project-structure)
+- [9. Configuration Details](#configuration-details)
+- [10. Admin Configuration](#admin-configuration)
+- [11. Admin Commands](#admin-commands)
+- [12. Data Privacy](#data-privacy)
+- [13. Customization](#customization)
+- [14. Future Enhancement Ideas](#future-enhancement-ideas)
+- [15. Troubleshooting](#troubleshooting)
+- [16. License](#license)
+- [17. Support](#support)
+- [18. Disclaimer](#disclaimer)
+
+## 1. Features
 
 - **Body Data Collection**: Collects user information including gender, age, weight, height, activity level, and fitness goals
 - **BMR & TDEE Calculation**: Uses the Harris-Benedict equation to calculate Basal Metabolic Rate and Total Daily Energy Expenditure
@@ -11,28 +32,28 @@ A comprehensive Telegram bot that helps users calculate their daily caloric need
 - **Case-Insensitive Inputs**: Supports user inputs in any case for better usability
 - **Web & Mobile Compatible**: Works seamlessly across Telegram web and mobile apps
 
-## Extra Features & Improvements
+## 2. Extra Features & Improvements
 
-### Enhanced User Experience
+### 2.1 Enhanced User Experience
 - **Persistent Data Storage**: Your nutritional information is now stored (inside bot memory), allowing you to generate new menus without re-entering your data
 - **Smart Start Command**: The bot recognizes returning users and offers options to generate a new menu or update information
 - **Multiple Menu Generation**: Generate as many menus as you want using your stored data
 - **Data Management**: Clear your stored data at any time with the `/clear_data` command
 
-### Admin Features
+### 2.2 Admin Features
 - **Access Control**: Restricted commands for bot administrators only
 - **Usage Statistics**: View bot usage metrics with `/stats` command
 - **User Management**: Get detailed information about specific users with `/userinfo <user_id>`
 - **Broadcast Messages**: Prepare messages to be sent to all users with `/broadcast <message>`
 - **Admin Help**: Access admin command documentation with `/admin_help`
 
-## Prerequisites
+## 3. Prerequisites
 
 - Python 3.8 or higher
 - A Telegram Bot Token from [@BotFather](https://t.me/BotFather)
 - (Optional) A DeepSeek API key from [DeepSeek Platform](https://platform.deepseek.com/) for AI menu generation
 
-## Installation
+## 4. Installation
 
 1. Clone or download this project to your local machine
 2. Install the required dependencies:
@@ -58,7 +79,7 @@ LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 4. Ensure your `config.py` file is included in `.gitignore` to prevent accidental exposure of your API keys
 
-## Usage
+## 5. Usage
 
 1. Run the bot:
 
@@ -79,9 +100,9 @@ python main.py
 5. The bot will calculate your BMR, TDEE, and recommended daily calorie intake
 6. Choose to generate a personalized weekly menu using AI
 
-## Enhanced Usage Flow
+## 6. Enhanced Usage Flow
 
-### For New Users:
+### 6.1 For New Users:
 1. Start with `/start` command
 2. Provide your body information (gender, age, weight, height)
 3. Select your activity level and goal
@@ -89,21 +110,21 @@ python main.py
 5. Generate your personalized weekly menu
 6. Your data is automatically saved for future use
 
-### For Returning Users:
+### 6.2 For Returning Users:
 1. Start with `/start` command
 2. Choose to "Generate New Menu" with existing data or "Update My Information"
 3. If generating a new menu, receive a fresh menu immediately
 4. If updating information, go through the data collection process again
 
 
-## Commands
+## 7. Commands
 
 - `/start` - Begin the conversation and provide your body data
 - `/diet` - Generate a basic diet plan after providing your data
 - `/weekly_menu` - Generate a detailed weekly menu after providing your data
 - `/cancel` - Cancel the current operation at any time
 
-## Project Structure
+## 8. Project Structure
 
 ```
 nutrition-bot/
@@ -113,7 +134,7 @@ nutrition-bot/
 └── README.md        # This file
 ```
 
-## Configuration Details
+## 9. Configuration Details
 
 The bot uses a separate `config.py` file for security reasons:
 
@@ -128,7 +149,7 @@ The bot uses a separate `config.py` file for security reasons:
 
 ---
 
-## Admin Configuration
+## 10. Admin Configuration
 
 To use admin features, add administrator user IDs to your `config.py`:
 
@@ -143,12 +164,12 @@ BOT_ADMINS = [123456789, 987654321]  # Replace with actual user IDs
 LOG_LEVEL = "INFO"
 ```
 
-### Finding Your Telegram User ID
+### 10.1 Finding Your Telegram User ID
 1. Start a conversation with [@userinfobot](https://t.me/userinfobot) on Telegram
 2. Send any message to the bot
 3. It will reply with your user ID
 
-## Admin Commands
+## 11. Admin Commands
 
 - `/stats` - View bot usage statistics and metrics
 - `/broadcast <message>` - Prepare a message to be sent to all users
@@ -161,14 +182,14 @@ LOG_LEVEL = "INFO"
 
 ----
 
-## Data Privacy
+## 12. Data Privacy
 
 - User data is stored in memory and will be lost when the bot restarts
 - Users can clear their data at any time with `/clear_data`
 - Admin features only work for users whose IDs are in the `BOT_ADMINS` list
 - For production use, consider implementing a proper database solution
 
-## Customization
+## 13. Customization
 
 You can customize the bot by:
 
@@ -177,7 +198,7 @@ You can customize the bot by:
 3. Changing the macronutrient distribution ratios in the diet plan
 4. Customizing the AI prompt in the `generate_weekly_menu` function
 
-## Future Enhancement Ideas
+## 14. Future Enhancement Ideas
 
 1. **Database Integration**: Replace in-memory storage with a proper database
 2. **Menu History**: Keep a history of generated menus for each user
@@ -186,9 +207,9 @@ You can customize the bot by:
 5. **Multi-language Support**: Add support for multiple languages
 
 
-## Troubleshooting
+## 15. Troubleshooting
 
-### Common Issues
+### 15.1 Common Issues
 
 1. **Buttons not visible in Telegram Web**: 
    - The web version of Telegram has limited support for custom keyboards
@@ -213,19 +234,19 @@ You can customize the bot by:
    - The AI processing time depends on the DeepSeek API response time
    - Large menus may take several seconds to generate
 
-### Logs
+### 15.2 Logs
 
 The bot generates logs that can help with debugging. Check the console output for any error messages.
 
-## License
+## 16. License
 
 This project is open source and available under the MIT License.
 
-## Support
+## 17. Support
 
 If you encounter any issues or have questions about the bot, please check the troubleshooting section above or create an issue in the project repository.
 
-## Disclaimer
+## 18. Disclaimer
 
 This bot provides nutritional information for educational purposes only. It is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of qualified health providers with questions about medical conditions.
 

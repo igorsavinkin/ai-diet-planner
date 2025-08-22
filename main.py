@@ -579,7 +579,7 @@ async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         f"🍽️ Your Personalized Diet Plan ({calories:.0f} calories)\n\n"
         f"Macronutrient Distribution:\n"
-        f"Protein: {protein_grams:.0极g ({protein_percentage*100:.0f}%)\n"
+        f"Protein: {protein_grams:.0f}g ({protein_percentage*100:.0f}%)\n"
         f"Carbs: {carb_grams:.0f}g ({carb_percentage*100:.0f}%)\n"
         f"Fats: {fat_grams:.0f}g ({fat_percentage*100:.0f}%)\n\n"
         f"Sample Meal Plan:\n"
@@ -666,7 +666,7 @@ def main() -> None:
         states={
             GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, gender)],
             AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, age)],
-            WEIGHT: [MessageHandler(filters.TEXT & ~极ilters.COMMAND, weight)],
+            WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, weight)],
             HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, height)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, activity)],
             GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, goal)],

@@ -152,6 +152,24 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """
     await update.message.reply_text(help_text)
 
+# *************** Utility functions *****************
+def create_colored_button(text, color_type="primary"):
+    """Create buttons with emoji color indicators"""
+    emoji = COLOR_EMOJIS.get(color_type, "⚪")
+    return f"{emoji} {text}"
+
+def create_keyboard(button_rows, color_scheme="primary"):
+    """
+    Create a keyboard with colored buttons
+    button_rows: List of lists containing button text
+    color_scheme: primary, success, warning, danger, or neutral
+    """
+    colored_rows = []
+    for row in button_rows:
+        colored_row = [create_colored_button(btn, color_scheme) for btn in row]
+        colored_rows.append(colored_row)
+    return colored_rows
+
 def format_menu_as_plain_text(menu_text):
     """
     Convert markdown-formatted menu to plain text with proper formatting for Telegram.
@@ -419,7 +437,7 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Handle different response types
     if response in ['yes', 'y', 'generate new menu']:
         await update.message.reply_text(
-            "Great! I'm generating your personalized weekly menu. This may take a moment...",
+            "Great! I'm generating your personalized weekly menu. 🍽️ 🙂🙂🙂 This may take a moment...",
             reply_markup=ReplyKeyboardRemove()
         )
         
@@ -435,23 +453,16 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             else:
                 await update.message.reply_text(weekly_menu)
             
-            # Offer to generate another menu or update information
-            reply_keyboard = [['Generate Another Menu', 'Update My Information']]
-            await update.message.reply_text(
-                "What would you like to do next?",
-                reply_markup=ReplyKeyboardMarkup(
-                    reply_keyboard, 
-                    one_time_keyboard=True,
-                    resize_keyboard=True
-                ),
-            )
-            return MENU_CONFIRM
+            # Ask for tip after successful menu generation
+            return await ask_for_tip(update, context)
         else:
             await update.message.reply_text(
                 "I apologize, but I'm having trouble generating your menu at the moment. "
                 "Please try again later or contact support if the issue persists.",
                 reply_markup=ReplyKeyboardRemove()
             )
+            # Show navigation options even if menu generation failed
+            await show_navigation_options(update, context)
             return ConversationHandler.END
             
     elif response in ['no', 'n', 'update my information']:
@@ -483,6 +494,7 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return MENU_CONFIRM
 
+
 async def generate_weekly_menu(user_data):
     """Generate a weekly menu using DeepSeek AI with plain text formatting"""
     if not client:
@@ -500,7 +512,7 @@ async def generate_weekly_menu(user_data):
     - TDEE: {user_data['tdee']:.0f} calories
     
     Please create a simple, practical weekly menu with breakfast, lunch, dinner, and optional snacks for each day.
-    Focus on common, affordable ingredients. Include portion sizes in grams or common measurements.
+    Focus on common, affordable preferrably European ingredients. Include portion sizes in grams or common measurements.
     
     IMPORTANT: Format the response as plain text (no markdown). Use clear section headers like:
     
@@ -517,6 +529,8 @@ async def generate_weekly_menu(user_data):
     - Steamed vegetables: 200g
     
     And so on for each day of the week.
+    
+    Add no more than 3 notes
     """
     
     try:
@@ -611,7 +625,8 @@ async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     context.user_data.update(user_data_store[user_id])
     
     await update.message.reply_text(
-        "I'm generating your personalized weekly menu. This may take a moment...",
+        "I'm generating your personalized weekly menu. 🍽️🍽️🙂🙂 This may take a moment...",
+
         reply_markup=ReplyKeyboardRemove()
     )
     
@@ -655,6 +670,217 @@ async def clear_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Exception while handling an update:", exc_info=context.error)
 
+## PAYMENT 
+# Add this to your conversation states
+TIP_AMOUNT, TIP_CONFIRM = range(8, 10)  # Extend the conversation states
+
+async def ask_for_tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask user if they want to leave a tip after menu generation"""
+    try:
+        from config import TIP_AMOUNTS
+    except ImportError:
+        return  # Tipping not configured
+    
+    tip_options = [
+        [f"{TIP_AMOUNTS['2']['emoji']} $2", f"{TIP_AMOUNTS['5']['emoji']} $5"],
+        [f"{TIP_AMOUNTS['10']['emoji']} $10", "Custom Amount"],
+        ["No, thank you"]
+    ]
+    
+    await update.message.reply_text(
+        "🎉 Your menu is ready! \n\n"
+        "Would you like to leave a tip 🪙 to support the development of this bot?\n"
+        "Your support helps keep this service free and improving!",
+        reply_markup=ReplyKeyboardMarkup(
+            tip_options,
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+    )
+    return TIP_AMOUNT
+
+async def handle_tip_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the tip amount selection"""
+    try:
+        from config import TIP_AMOUNTS, PAYPAL_ME_USERNAME
+    except ImportError:
+        await update.message.reply_text("Thank you for using the bot!")
+        return ConversationHandler.END
+    
+    user_choice = update.message.text
+    
+    if user_choice == "No, thank you":
+        await update.message.reply_text(
+            "Thank you for using the bot! 😊\n\n"
+            "You can always generate a new menu with /weekly_menu",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        # Show navigation options
+        await show_navigation_options(update, context)
+        return ConversationHandler.END
+    
+    else:
+        # Parse the selected amount
+        amount = None
+        for key, value in TIP_AMOUNTS.items():
+            if key != "custom" and f"{value['emoji']} ${value['amount']}" == user_choice:
+                amount = value['amount']
+                break
+        
+        if amount:
+            paypal_link = f"https://paypal.me/{PAYPAL_ME_USERNAME}/{amount}USD"
+            message = (
+                f"Thank you for your ${amount} tip! 💖\n\n"
+                f"Please complete your payment using this link:\n{paypal_link}\n\n"
+                "Your support is greatly appreciated and helps improve this service!"
+            )
+            
+            await update.message.reply_text(
+                message,
+                reply_markup=ReplyKeyboardRemove(),
+                disable_web_page_preview=True
+            )
+            
+            # Show navigation options after payment message
+            await show_navigation_options(update, context)
+        else:
+            await update.message.reply_text(
+                "Thank you for using the bot!",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            # Show navigation options
+            await show_navigation_options(update, context)
+        
+        return ConversationHandler.END
+
+async def handle_custom_tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle custom tip amount"""
+    try:
+        from config import PAYPAL_ME_USERNAME
+    except ImportError:
+        await update.message.reply_text("Thank you for using the bot!")
+        return ConversationHandler.END
+    
+    try:
+        custom_amount = float(update.message.text)
+        if custom_amount < 1:
+            await update.message.reply_text("Minimum tip amount is $1. Please enter a valid amount:")
+            return TIP_CONFIRM
+        
+        paypal_link = f"https://paypal.me/{PAYPAL_ME_USERNAME}/{custom_amount}USD"
+        message = (
+            f"Thank you for your ${custom_amount} tip! 💖\n\n"
+            f"Please complete your payment using this link:\n{paypal_link}\n\n"
+            "Your support is greatly appreciated and helps improve this service!"
+        )
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=ReplyKeyboardRemove(),
+            disable_web_page_preview=True
+        )
+        
+        # Show navigation options after payment message
+        await show_navigation_options(update, context)
+        
+    except ValueError:
+        await update.message.reply_text("Please enter a valid number for your tip amount:")
+        return TIP_CONFIRM
+    
+    return ConversationHandler.END
+
+async def show_navigation_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show navigation options to continue using the bot"""
+    navigation_keyboard = [
+        ["📋 Generate New Menu", "🔄 Update My Info"],
+        ["📊 View My Stats", "❌ Clear My Data"],
+        ["🏠 Main Menu"]
+    ]
+    
+    await update.message.reply_text(
+        "What would you like to do next?",
+        reply_markup=ReplyKeyboardMarkup(
+            navigation_keyboard,
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+    )
+
+async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle navigation menu selections"""
+    user_choice = update.message.text
+    user_id = update.message.from_user.id
+    
+    if user_choice == "📋 Generate New Menu":
+        # Check if user has existing data
+        if user_id not in user_data_store or 'calories' not in user_data_store[user_id]:
+            await update.message.reply_text(
+                "Please provide your body data first using /start",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return await start(update, context)
+        
+        # Use stored data
+        context.user_data.update(user_data_store[user_id])
+        await weekly_menu(update, context)
+        
+    elif user_choice == "🔄 Update My Info":
+        await update.message.reply_text(
+            "Let's update your information!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return await start(update, context)
+        
+    elif user_choice == "📊 View My Stats":
+        if user_id not in user_data_store:
+            await update.message.reply_text(
+                "No data found. Please set up your information first with /start",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            user_data = user_data_store[user_id]
+            stats_message = (
+                "📊 Your Nutrition Stats:\n\n"
+                f"Gender: {user_data.get('gender', 'N/A')}\n"
+                f"Age: {user_data.get('age', 'N/A')}\n"
+                f"Weight: {user_data.get('weight', 'N/A')} kg\n"
+                f"Height: {user_data.get('height', 'N/A')} cm\n"
+                f"Activity: {user_data.get('activity', 'N/A')}\n"
+                f"Goal: {user_data.get('goal', 'N/A')}\n"
+                f"Daily Calories: {user_data.get('calories', 'N/A')} kcal\n"
+                f"BMR: {user_data.get('bmr', 'N/A')}\n"
+                f"TDEE: {user_data.get('tdee', 'N/A')}"
+            )
+            await update.message.reply_text(
+                stats_message,
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await show_navigation_options(update, context)
+            
+    elif user_choice == "❌ Clear My Data":
+        if user_id in user_data_store:
+            del user_data_store[user_id]
+            await update.message.reply_text(
+                "Your data has been cleared successfully!",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            await update.message.reply_text(
+                "No data found to clear.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        await show_navigation_options(update, context)
+        
+    elif user_choice == "🏠 Main Menu":
+        await update.message.reply_text(
+            "Returning to main menu...",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return await start(update, context)
+    
+    return ConversationHandler.END
+
+
 # Main function
 def main() -> None:
     # Create the Application using ApplicationBuilder with token from config
@@ -671,6 +897,8 @@ def main() -> None:
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, activity)],
             GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, goal)],
             MENU_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_confirmation)],
+            TIP_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tip_amount)],
+            TIP_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_tip)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
@@ -680,6 +908,11 @@ def main() -> None:
     application.add_handler(CommandHandler('weekly_menu', weekly_menu))
     application.add_handler(CommandHandler('clear_data', clear_data))
     
+    # Add navigation handler
+    application.add_handler(MessageHandler(filters.Regex(
+        r'^(📋 Generate New Menu|🔄 Update My Info|📊 View My Stats|❌ Clear My Data|🏠 Main Menu)$'
+    ), handle_navigation))
+
     # Add admin command handlers
     application.add_handler(CommandHandler('stats', admin_stats))
     application.add_handler(CommandHandler('broadcast', broadcast))

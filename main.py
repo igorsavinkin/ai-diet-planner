@@ -53,6 +53,117 @@ else:
     client = None
     logger.warning("DeepSeek API key not configured. AI menu generation will be disabled.")
 
+# ******* ADMIN functions ******* 
+
+def admin_required(func):
+    """Decorator to check if user is admin before executing command"""
+    async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user_id = update.message.from_user.id
+        if not is_admin(user_id):
+            await update.message.reply_text("❌ This command is for administrators only.")
+            return
+        return await func(update, context, *args, **kwargs)
+    return wrapped
+
+# Check if admin
+def is_admin(user_id: int) -> bool:
+    """Check if a user is in the admin list"""
+    try:
+        from config import BOT_ADMINS
+        return user_id in BOT_ADMINS
+    except (ImportError, AttributeError):
+        # If BOT_ADMINS is not configured, return False
+        return False
+
+@admin_required
+async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin commands help"""
+    help_text = """
+    🤖 Admin Commands:
+    
+    /stats - Show bot usage statistics
+    /broadcast <message> - Send message to all users
+    /userinfo <user_id> - Get information about a user
+    /admin_help - Show this help message
+    """
+    await update.message.reply_text(help_text)
+
+# Admin statistics
+@admin_required
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display bot usage statistics (admin only)"""
+    user_id = update.message.from_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ This command is for administrators only.")
+        return
+    
+    # Example statistics - you would track these in your database
+    stats_message = (
+        "📊 Bot Statistics:\n\n"
+        "Total Users: 150\n"
+        "Active Today: 23\n"
+        "Menus Generated: 287\n"
+        "Most Popular Goal: Weight Loss (65%)\n"
+        "Average Calories: 1950 kcal"
+    )
+    
+    await update.message.reply_text(stats_message)
+
+# Broadcast Message to bot users
+@admin_required
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message to all users (admin only)"""
+    user_id = update.message.from_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ This command is for administrators only.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+    
+    message = " ".join(context.args)
+    
+    # In a real implementation, you would iterate through your user database
+    # For now, we'll just confirm the command works
+    await update.message.reply_text(
+        f"📢 Broadcast message prepared:\n\n{message}\n\n"
+        f"(In a full implementation, this would be sent to all users)"
+    )
+
+# User management by admin
+@admin_required
+async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Get information about a specific user (admin only)"""
+    user_id = update.message.from_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ This command is for administrators only.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /userinfo <user_id>")
+        return
+    
+    target_user_id = int(context.args[0])
+    
+    # Simulate getting user info from database
+    user_info_msg = (
+        f"👤 User Information for ID {target_user_id}:\n\n"
+        f"First Seen: 2023-10-15\n"
+        f"Last Active: 2023-11-05\n"
+        f"Calculations Done: 8\n"
+        f"Menus Generated: 3\n"
+        f"Current Goal: Lose Weight\n"
+        f"Target Calories: 1800 kcal"
+    )
+    
+    await update.message.reply_text(user_info_msg)
+
+
+
 def format_menu_as_plain_text(menu_text):
     """
     Convert markdown-formatted menu to plain text with proper formatting for Telegram.
@@ -350,7 +461,7 @@ async def generate_weekly_menu(user_data):
     - TDEE: {user_data['tdee']:.0f} calories
     
     Please create a simple, practical weekly menu with breakfast, lunch, dinner, and optional snacks for each day.
-    Focus on common, affordable ingredients. Include portion sizes in grams or common measurements.
+    Focus on common, affordable, prefferably European ingredients. Include portion sizes in grams or common measurements.
     
     IMPORTANT: Format the response as plain text (no markdown). Use clear section headers like:
     
@@ -496,7 +607,12 @@ def main() -> None:
 
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('diet', generate_diet))
-    application.add_handler(CommandHandler('weekly_menu', weekly_menu))
+    application.add_handler(CommandHandler('weekly_menu', weekly_menu)) 
+    # Admin command handlers
+    application.add_handler(CommandHandler('stats', admin_stats))
+    application.add_handler(CommandHandler('broadcast', broadcast))
+    application.add_handler(CommandHandler('userinfo', user_info))
+    application.add_handler(CommandHandler('admin_help', admin_help))
     
     # Add error handler
     application.add_error_handler(error_handler)

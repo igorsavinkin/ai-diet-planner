@@ -156,7 +156,9 @@ LOG_LEVEL = "INFO"
 - `/admin_help` - Show help for all admin commands
 
 ---
+
 **Note**: The admin features provide powerful tools for managing your bot. Use them responsibly and keep your admin user IDs secure. Always inform users about data collection practices and provide options to delete their data.
+
 ----
 
 ## Data Privacy

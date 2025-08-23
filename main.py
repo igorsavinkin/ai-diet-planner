@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # main.py
 import logging
 import json
@@ -428,7 +429,7 @@ async def goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"BMR (Basal Metabolic Rate): {bmr:.0f} calories\n"
         f"TDEE (Total Daily Energy Expenditure): {tdee:.0f} calories\n"
         f"Recommended daily intake: {calories:.0f} calories\n\n"
-        "Would you like me to generate a personalized weekly menu?",
+        "Would you like me to generate a personalized menu for a week?",
         reply_markup=reply_markup
     )
     
@@ -443,7 +444,7 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Handle different response types
     if response == 'yes':
         await query.edit_message_text(
-            "Great! I'm generating your personalized weekly menu. 🍽️🍽️🍽️ This may take a moment...🙂🙂🙂"
+            "Great! I'm generating your personalized menu for a week. 🥗 🍱 🌮 This may take a moment...🙂🙂🙂"
         )
         
         # Generate weekly menu using AI
@@ -626,8 +627,8 @@ async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Use stored data
     context.user_data.update(user_data_store[user_id])
     
-    await update.message.reply_text(
-        "I'm generating your personalized weekly menu. 🍽️🍽️🍽️This may take a moment...🙂🙂"
+    await update.message.reply_text( 
+        "I'm generating your personalized weekly menu. 🥗 🍱 🌮 This may take a moment...🙂🙂"
     )
     
     # Generate weekly menu using AI
@@ -827,7 +828,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Use stored data
         context.user_data.update(user_data_store[user_id])
         await query.edit_message_text(
-            "I'm generating your personalized weekly menu. 🍽️🙂 This may take a moment..."
+            "I'm generating your personalized weekly menu.  🥗 🍱 🌮  This may take a moment...🙂"
         )
         
         # Generate weekly menu using AI
@@ -967,6 +968,7 @@ def main() -> None:
             TIP_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_tip)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
+        per_message=True,  # Add this line to fix the warning
     )
 
     application.add_handler(conv_handler)

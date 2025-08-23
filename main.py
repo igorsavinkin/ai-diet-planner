@@ -3,10 +3,10 @@ import logging
 import json
 import os
 import re
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
-    ConversationHandler, ContextTypes, filters
+    ConversationHandler, ContextTypes, filters, CallbackQueryHandler
 )
 
 # Import configuration
@@ -68,9 +68,12 @@ def is_admin(user_id: int) -> bool:
 def admin_required(func):
     """Decorator to check if user is admin before executing command"""
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        user_id = update.message.from_user.id
+        user_id = update.callback_query.from_user.id if update.callback_query else update.message.from_user.id
         if not is_admin(user_id):
-            await update.message.reply_text("❌ This command is for administrators only.")
+            if update.callback_query:
+                await update.callback_query.answer("❌ This command is for administrators only.")
+            else:
+                await update.message.reply_text("❌ This command is for administrators only.")
             return
         return await func(update, context, *args, **kwargs)
     return wrapped
@@ -88,35 +91,52 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "Average Calories: 1950 kcal"
     )
     
-    await update.message.reply_text(stats_message)
+    if update.callback_query:
+        await update.callback_query.message.reply_text(stats_message)
+    else:
+        await update.message.reply_text(stats_message)
 
 @admin_required
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message to all users (admin only)"""
     if not context.args:
-        await update.message.reply_text("Usage: /broadcast <message>")
+        if update.callback_query:
+            await update.callback_query.message.reply_text("Usage: /broadcast <message>")
+        else:
+            await update.message.reply_text("Usage: /broadcast <message>")
         return
     
     message = " ".join(context.args)
     
     # In a real implementation, you would iterate through your user database
     # For now, we'll just confirm the command works
-    await update.message.reply_text(
+    response_text = (
         f"📢 Broadcast message prepared:\n\n{message}\n\n"
         f"(In a full implementation, this would be sent to all {len(user_data_store)} users)"
     )
+    
+    if update.callback_query:
+        await update.callback_query.message.reply_text(response_text)
+    else:
+        await update.message.reply_text(response_text)
 
 @admin_required
 async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Get information about a specific user (admin only)"""
     if not context.args:
-        await update.message.reply_text("Usage: /userinfo <user_id>")
+        if update.callback_query:
+            await update.callback_query.message.reply_text("Usage: /userinfo <user_id>")
+        else:
+            await update.message.reply_text("Usage: /userinfo <user_id>")
         return
     
     try:
         target_user_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
+        if update.callback_query:
+            await update.callback_query.message.reply_text("Please provide a valid user ID.")
+        else:
+            await update.message.reply_text("Please provide a valid user ID.")
         return
     
     # Check if user exists in our data store
@@ -137,7 +157,10 @@ async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         user_info_msg = f"User with ID {target_user_id} not found in the database."
     
-    await update.message.reply_text(user_info_msg)
+    if update.callback_query:
+        await update.callback_query.message.reply_text(user_info_msg)
+    else:
+        await update.message.reply_text(user_info_msg)
 
 @admin_required
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -150,26 +173,12 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     /userinfo <user_id> - Get information about a user
     /admin_help - Show this help message
     """
-    await update.message.reply_text(help_text)
+    if update.callback_query:
+        await update.callback_query.message.reply_text(help_text)
+    else:
+        await update.message.reply_text(help_text)
 
 # *************** Utility functions *****************
-def create_colored_button(text, color_type="primary"):
-    """Create buttons with emoji color indicators"""
-    emoji = COLOR_EMOJIS.get(color_type, "⚪")
-    return f"{emoji} {text}"
-
-def create_keyboard(button_rows, color_scheme="primary"):
-    """
-    Create a keyboard with colored buttons
-    button_rows: List of lists containing button text
-    color_scheme: primary, success, warning, danger, or neutral
-    """
-    colored_rows = []
-    for row in button_rows:
-        colored_row = [create_colored_button(btn, color_scheme) for btn in row]
-        colored_rows.append(colored_row)
-    return colored_rows
-
 def format_menu_as_plain_text(menu_text):
     """
     Convert markdown-formatted menu to plain text with proper formatting for Telegram.
@@ -210,17 +219,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     if has_previous_data:
         # User has previous data - show options to generate menu or update info
-        reply_keyboard = [['Generate New Menu', 'Update My Information']]
+        keyboard = [
+            [InlineKeyboardButton("Generate New Menu", callback_data="generate_menu")],
+            [InlineKeyboardButton("Update My Information", callback_data="update_info")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             f"Welcome back {user.first_name}! 👋\n\n"
             "I see you've already provided your information before.\n\n"
             "Would you like to generate a new menu with your existing data "
             "or update your information?",
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, 
-                one_time_keyboard=True,
-                resize_keyboard=True
-            ),
+            reply_markup=reply_markup
         )
         return MENU_CONFIRM
     else:
@@ -232,36 +242,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Type /cancel at any time to stop our conversation."
         )
         
-        # Ask for gender with both buttons and text instructions
-        reply_keyboard = [['Male', 'Female']]
+        # Ask for gender with inline buttons
+        keyboard = [
+            [InlineKeyboardButton("Male", callback_data="gender_male")],
+            [InlineKeyboardButton("Female", callback_data="gender_female")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
-            'Please select your gender:\n\n'
-            'If you don\'t see buttons, please type: "Male" or "Female"',
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, 
-                one_time_keyboard=True,
-                resize_keyboard=True
-            ),
+            'Please select your gender:',
+            reply_markup=reply_markup
         )
         return GENDER
 
 async def gender(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.message.from_user
-    gender_input = update.message.text.strip().lower()
+    query = update.callback_query
+    await query.answer()
+    
+    user = query.from_user
+    gender_input = query.data.replace("gender_", "")
     
     # Validate input
     if gender_input not in ['male', 'female']:
-        await update.message.reply_text(
-            'Please enter a valid gender. Type "Male" or "Female":'
+        await query.edit_message_text(
+            'Please select a valid gender:'
         )
         return GENDER
     
     context.user_data['gender'] = gender_input.capitalize()
     logger.info("Gender of %s: %s", user.first_name, context.user_data['gender'])
     
-    await update.message.reply_text(
-        'Great! Now please enter your age:',
-        reply_markup=ReplyKeyboardRemove(),
+    # Edit the message to remove buttons
+    await query.edit_message_text(
+        'Great! Now please enter your age:'
     )
     return AGE
 
@@ -307,20 +320,15 @@ async def height(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data['height'] = height
         logger.info("Height of %s: %s cm", user.first_name, height)
         
-        # Ask for activity level with both buttons and text instructions
+        # Ask for activity level with inline buttons
         activity_options = list(ACTIVITY_LEVELS.keys())
-        reply_keyboard = [[option] for option in activity_options]  # One button per row
-        
-        activity_instructions = "\n".join([f"- {option}" for option in activity_options])
+        keyboard = [[InlineKeyboardButton(option, callback_data=f"activity_{i}")] 
+                   for i, option in enumerate(activity_options)]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f'Please select your activity level:\n\n'
-            f'If you don\'t see buttons, please type one of these options (case insensitive):\n{activity_instructions}',
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, 
-                one_time_keyboard=True,
-                resize_keyboard=True
-            ),
+            'Please select your activity level:',
+            reply_markup=reply_markup
         )
         return ACTIVITY
     except ValueError:
@@ -328,53 +336,47 @@ async def height(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return HEIGHT
 
 async def activity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.message.from_user
-    activity_input = update.message.text.strip().lower()
+    query = update.callback_query
+    await query.answer()
     
-    # Validate input using case-insensitive mapping
-    if activity_input not in ACTIVITY_MAPPING:
-        activity_options = list(ACTIVITY_LEVELS.keys())
-        activity_instructions = "\n".join([f"- {option}" for option in activity_options])
-        
-        await update.message.reply_text(
-            f'Please select a valid activity level from these options (case insensitive):\n{activity_instructions}'
-        )
+    user = query.from_user
+    activity_idx = int(query.data.replace("activity_", ""))
+    activity_options = list(ACTIVITY_LEVELS.keys())
+    
+    if activity_idx < 0 or activity_idx >= len(activity_options):
+        await query.edit_message_text('Please select a valid activity level:')
         return ACTIVITY
         
-    # Map to the correct case version
-    context.user_data['activity'] = ACTIVITY_MAPPING[activity_input]
+    # Set the activity level
+    context.user_data['activity'] = activity_options[activity_idx]
     logger.info("Activity level of %s: %s", user.first_name, context.user_data['activity'])
     
-    # Ask for goal with both buttons and text instructions
+    # Ask for goal with inline buttons
     goal_options = ['Lose weight', 'Maintain weight', 'Gain weight']
-    reply_keyboard = [goal_options]  # All buttons in one row
+    keyboard = [[InlineKeyboardButton(option, callback_data=f"goal_{i}")] 
+               for i, option in enumerate(goal_options)]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        'What is your goal?\n\n'
-        'If you don\'t see buttons, please type one of these options (case insensitive):\n'
-        '- Lose weight\n- Maintain weight\n- Gain weight',
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard, 
-            one_time_keyboard=True,
-            resize_keyboard=True
-        ),
+    await query.edit_message_text(
+        'What is your goal?',
+        reply_markup=reply_markup
     )
     return GOAL
 
 async def goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.message.from_user
-    goal_input = update.message.text.strip().lower()
+    query = update.callback_query
+    await query.answer()
     
-    # Validate input using case-insensitive mapping
-    if goal_input not in GOAL_MAPPING:
-        await update.message.reply_text(
-            'Please select a valid goal. Type one of these options (case insensitive):\n'
-            '- Lose weight\n- Maintain weight\n- Gain weight'
-        )
+    user = query.from_user
+    goal_idx = int(query.data.replace("goal_", ""))
+    goal_options = ['Lose weight', 'Maintain weight', 'Gain weight']
+    
+    if goal_idx < 0 or goal_idx >= len(goal_options):
+        await query.edit_message_text('Please select a valid goal:')
         return GOAL
         
-    # Map to the correct case version
-    context.user_data['goal'] = GOAL_MAPPING[goal_input]
+    # Set the goal
+    context.user_data['goal'] = goal_options[goal_idx]
     logger.info("Goal of %s: %s", user.first_name, context.user_data['goal'])
     
     # Calculate BMR
@@ -408,7 +410,13 @@ async def goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_data_store[user_id] = context.user_data.copy()
     
     # Display results
-    await update.message.reply_text(
+    keyboard = [
+        [InlineKeyboardButton("Yes, generate menu! 🍽️", callback_data="menu_yes")],
+        [InlineKeyboardButton("No, update my information", callback_data="menu_no")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
         f"✅ Your data has been recorded:\n\n"
         f"Gender: {context.user_data['gender']}\n"
         f"Age: {context.user_data['age']} years\n"
@@ -420,25 +428,22 @@ async def goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"BMR (Basal Metabolic Rate): {bmr:.0f} calories\n"
         f"TDEE (Total Daily Energy Expenditure): {tdee:.0f} calories\n"
         f"Recommended daily intake: {calories:.0f} calories\n\n"
-        "Would you like me to generate a personalized weekly menu? (Yes/No - case insensitive)",
-        reply_markup=ReplyKeyboardMarkup(
-            [['Yes', 'No']],
-            one_time_keyboard=True,
-            resize_keyboard=True
-        ),
+        "Would you like me to generate a personalized weekly menu?",
+        reply_markup=reply_markup
     )
     
     return MENU_CONFIRM
 
 async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.message.from_user
-    response = update.message.text.strip().lower()
+    query = update.callback_query
+    await query.answer()
+    
+    response = query.data.replace("menu_", "")
     
     # Handle different response types
-    if response in ['yes', 'y', 'generate new menu']:
-        await update.message.reply_text(
-            "Great! I'm generating your personalized weekly menu. 🍽️ 🙂🙂🙂 This may take a moment...",
-            reply_markup=ReplyKeyboardRemove()
+    if response == 'yes':
+        await query.edit_message_text(
+            "Great! I'm generating your personalized weekly menu. 🍽️🍽️🍽️ This may take a moment...🙂🙂🙂"
         )
         
         # Generate weekly menu using AI
@@ -449,48 +454,44 @@ async def menu_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if len(weekly_menu) > 4000:
                 parts = [weekly_menu[i:i+4000] for i in range(0, len(weekly_menu), 4000)]
                 for part in parts:
-                    await update.message.reply_text(part)
+                    await query.message.reply_text(part)
             else:
-                await update.message.reply_text(weekly_menu)
+                await query.message.reply_text(weekly_menu)
             
             # Ask for tip after successful menu generation
-            return await ask_for_tip(update, context)
+            return await ask_for_tip(query.message, context)
         else:
-            await update.message.reply_text(
+            await query.message.reply_text(
                 "I apologize, but I'm having trouble generating your menu at the moment. "
-                "Please try again later or contact support if the issue persists.",
-                reply_markup=ReplyKeyboardRemove()
+                "Please try again later or contact support if the issue persists."
             )
             # Show navigation options even if menu generation failed
-            await show_navigation_options(update, context)
+            await show_navigation_options(query.message, context)
             return ConversationHandler.END
             
-    elif response in ['no', 'n', 'update my information']:
-        await update.message.reply_text(
-            "No problem! Let's update your information.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        
+    elif response == 'no':
         # Ask for gender to start the update process
-        reply_keyboard = [['Male', 'Female']]
-        await update.message.reply_text(
-            'Please select your gender:\n\n'
-            'If you don\'t see buttons, please type: "Male" or "Female"',
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, 
-                one_time_keyboard=True,
-                resize_keyboard=True
-            ),
+        keyboard = [
+            [InlineKeyboardButton("Male", callback_data="gender_male")],
+            [InlineKeyboardButton("Female", callback_data="gender_female")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            'No problem! Let\'s update your information. Please select your gender:',
+            reply_markup=reply_markup
         )
         return GENDER
     else:
-        await update.message.reply_text(
-            "Please respond with 'Yes' or 'No' (case insensitive):",
-            reply_markup=ReplyKeyboardMarkup(
-                [['Yes', 'No']],
-                one_time_keyboard=True,
-                resize_keyboard=True
-            ),
+        keyboard = [
+            [InlineKeyboardButton("Yes, generate menu! 🍽️", callback_data="menu_yes")],
+            [InlineKeyboardButton("No, update my information", callback_data="menu_no")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "Please select an option:",
+            reply_markup=reply_markup
         )
         return MENU_CONFIRM
 
@@ -556,8 +557,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.message.from_user
     logger.info("User %s canceled the conversation.", user.first_name)
     await update.message.reply_text(
-        'Bye! I hope we can talk again some day.', 
-        reply_markup=ReplyKeyboardRemove()
+        'Bye! I hope we can talk again some day.'
     )
     return ConversationHandler.END
 
@@ -590,6 +590,12 @@ async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     fat_grams = fat_cal / 9
     
     # Sample meal plan
+    keyboard = [
+        [InlineKeyboardButton("Yes, generate menu! 🍽️", callback_data="menu_yes")],
+        [InlineKeyboardButton("No, thanks", callback_data="menu_no")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
         f"🍽️ Your Personalized Diet Plan ({calories:.0f} calories)\n\n"
         f"Macronutrient Distribution:\n"
@@ -601,12 +607,8 @@ async def generate_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"Lunch: {calories*0.35:.0f} calories\n"
         f"Dinner: {calories*0.30:.0f} calories\n"
         f"Snack: {calories*0.10:.0f} calories\n\n"
-        "Would you like me to generate a detailed weekly menu? (Yes/No - case insensitive)",
-        reply_markup=ReplyKeyboardMarkup(
-            [['Yes', 'No']],
-            one_time_keyboard=True,
-            resize_keyboard=True
-        ),
+        "Would you like me to generate a detailed weekly menu?",
+        reply_markup=reply_markup
     )
     
     return MENU_CONFIRM
@@ -625,9 +627,7 @@ async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     context.user_data.update(user_data_store[user_id])
     
     await update.message.reply_text(
-        "I'm generating your personalized weekly menu. 🍽️🍽️🙂🙂 This may take a moment...",
-
-        reply_markup=ReplyKeyboardRemove()
+        "I'm generating your personalized weekly menu. 🍽️🍽️🍽️This may take a moment...🙂🙂"
     )
     
     # Generate weekly menu using AI
@@ -643,14 +643,15 @@ async def weekly_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text(weekly_menu)
             
         # Offer to generate another menu or update information
-        reply_keyboard = [['Generate Another Menu', 'Update My Information']]
+        keyboard = [
+            [InlineKeyboardButton("Generate Another Menu", callback_data="generate_menu")],
+            [InlineKeyboardButton("Update My Information", callback_data="update_info")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             "What would you like to do next?",
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, 
-                one_time_keyboard=True,
-                resize_keyboard=True
-            ),
+            reply_markup=reply_markup
         )
     else:
         await update.message.reply_text(
@@ -674,60 +675,62 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # Add this to your conversation states
 TIP_AMOUNT, TIP_CONFIRM = range(8, 10)  # Extend the conversation states
 
-async def ask_for_tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_for_tip(message, context: ContextTypes.DEFAULT_TYPE):
     """Ask user if they want to leave a tip after menu generation"""
     try:
         from config import TIP_AMOUNTS
     except ImportError:
         return  # Tipping not configured
     
-    tip_options = [
-        [f"{TIP_AMOUNTS['2']['emoji']} $2", f"{TIP_AMOUNTS['5']['emoji']} $5"],
-        [f"{TIP_AMOUNTS['10']['emoji']} $10", "Custom Amount"],
-        ["No, thank you"]
+    keyboard = [
+        [InlineKeyboardButton(f"{TIP_AMOUNTS['2']['emoji']} $2", callback_data="tip_2")],
+        [InlineKeyboardButton(f"{TIP_AMOUNTS['5']['emoji']} $5", callback_data="tip_5")],
+        [InlineKeyboardButton(f"{TIP_AMOUNTS['10']['emoji']} $10", callback_data="tip_10")],
+        [InlineKeyboardButton("Custom Amount", callback_data="tip_custom")],
+        [InlineKeyboardButton("No, thank you", callback_data="tip_no")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    await message.reply_text(
         "🎉 Your menu is ready! \n\n"
         "Would you like to leave a tip 🪙 to support the development of this bot?\n"
         "Your support helps keep this service free and improving!",
-        reply_markup=ReplyKeyboardMarkup(
-            tip_options,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=reply_markup
     )
     return TIP_AMOUNT
 
 async def handle_tip_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the tip amount selection"""
+    query = update.callback_query
+    await query.answer()
+    
     try:
         from config import TIP_AMOUNTS, PAYPAL_ME_USERNAME
     except ImportError:
-        await update.message.reply_text("Thank you for using the bot!")
+        await query.edit_message_text("Thank you for using the bot! 😊")
+        # Show navigation options
+        await show_navigation_options(query.message, context)
         return ConversationHandler.END
     
-    user_choice = update.message.text
+    tip_data = query.data.replace("tip_", "")
     
-    if user_choice == "No, thank you":
-        await update.message.reply_text(
+    if tip_data == "no":
+        await query.edit_message_text(
             "Thank you for using the bot! 😊\n\n"
-            "You can always generate a new menu with /weekly_menu",
-            reply_markup=ReplyKeyboardRemove()
+            "You can always generate a new menu with /weekly_menu"
         )
         # Show navigation options
-        await show_navigation_options(update, context)
+        await show_navigation_options(query.message, context)
         return ConversationHandler.END
-    
+    elif tip_data == "custom":
+        await query.edit_message_text(
+            "Please enter your custom tip amount in USD:"
+        )
+        return TIP_CONFIRM
     else:
         # Parse the selected amount
-        amount = None
-        for key, value in TIP_AMOUNTS.items():
-            if key != "custom" and f"{value['emoji']} ${value['amount']}" == user_choice:
-                amount = value['amount']
-                break
-        
-        if amount:
+        amount = tip_data
+        if amount in TIP_AMOUNTS:
             paypal_link = f"https://paypal.me/{PAYPAL_ME_USERNAME}/{amount}USD"
             message = (
                 f"Thank you for your ${amount} tip! 💖\n\n"
@@ -735,21 +738,19 @@ async def handle_tip_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Your support is greatly appreciated and helps improve this service!"
             )
             
-            await update.message.reply_text(
+            await query.edit_message_text(
                 message,
-                reply_markup=ReplyKeyboardRemove(),
                 disable_web_page_preview=True
             )
             
             # Show navigation options after payment message
-            await show_navigation_options(update, context)
+            await show_navigation_options(query.message, context)
         else:
-            await update.message.reply_text(
+            await query.edit_message_text(
                 "Thank you for using the bot!",
-                reply_markup=ReplyKeyboardRemove()
             )
             # Show navigation options
-            await show_navigation_options(update, context)
+            await show_navigation_options(query.message, context)
         
         return ConversationHandler.END
 
@@ -776,12 +777,11 @@ async def handle_custom_tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             message,
-            reply_markup=ReplyKeyboardRemove(),
             disable_web_page_preview=True
         )
         
         # Show navigation options after payment message
-        await show_navigation_options(update, context)
+        await show_navigation_options(update.message, context)
         
     except ValueError:
         await update.message.reply_text("Please enter a valid number for your tip amount:")
@@ -789,53 +789,89 @@ async def handle_custom_tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
-async def show_navigation_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_navigation_options(message, context: ContextTypes.DEFAULT_TYPE):
     """Show navigation options to continue using the bot"""
-    navigation_keyboard = [
-        ["📋 Generate New Menu", "🔄 Update My Info"],
-        ["📊 View My Stats", "❌ Clear My Data"],
-        ["🏠 Main Menu"]
+    keyboard = [
+        [InlineKeyboardButton("📋 Generate New Menu", callback_data="generate_menu")],
+        [InlineKeyboardButton("🔄 Update My Info", callback_data="update_info")],
+        [InlineKeyboardButton("📊 View My Stats", callback_data="view_stats")],
+        [InlineKeyboardButton("❌ Clear My Data", callback_data="clear_data")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    await message.reply_text(
         "What would you like to do next?",
-        reply_markup=ReplyKeyboardMarkup(
-            navigation_keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=reply_markup
     )
 
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle navigation menu selections"""
-    user_choice = update.message.text
-    user_id = update.message.from_user.id
+    """Handle navigation menu selections with the new structure"""
+    query = update.callback_query
+    await query.answer()
     
-    if user_choice == "📋 Generate New Menu":
+    user_choice = query.data
+    user_id = query.from_user.id
+    has_data = user_id in user_data_store and user_data_store[user_id].get('calories')
+    is_user_admin = is_admin(user_id)
+    
+    if user_choice == "generate_menu":
         # Check if user has existing data
-        if user_id not in user_data_store or 'calories' not in user_data_store[user_id]:
-            await update.message.reply_text(
-                "Please provide your body data first using /start",
-                reply_markup=ReplyKeyboardRemove()
+        if not has_data:
+            await query.edit_message_text(
+                "Please provide your body data first to generate a menu."
             )
-            return await start(update, context)
+            # Show the main menu again
+            return await show_main_menu(query.message, user_id, has_data, is_user_admin)
         
         # Use stored data
         context.user_data.update(user_data_store[user_id])
-        await weekly_menu(update, context)
-        
-    elif user_choice == "🔄 Update My Info":
-        await update.message.reply_text(
-            "Let's update your information!",
-            reply_markup=ReplyKeyboardRemove()
+        await query.edit_message_text(
+            "I'm generating your personalized weekly menu. 🍽️🙂 This may take a moment..."
         )
-        return await start(update, context)
         
-    elif user_choice == "📊 View My Stats":
+        # Generate weekly menu using AI
+        weekly_menu = await generate_weekly_menu(context.user_data)
+        
+        if weekly_menu:
+            # Split long message into parts if needed
+            if len(weekly_menu) > 4000:
+                parts = [weekly_menu[i:i+4000] for i in range(0, len(weekly_menu), 4000)]
+                for part in parts:
+                    await context.bot.send_message(chat_id=query.message.chat_id, text=part)
+            else:
+                await context.bot.send_message(chat_id=query.message.chat_id, text=weekly_menu)
+            
+            # Ask for tip after successful menu generation
+            await ask_for_tip(query.message, context)
+        else:
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="I apologize, but I'm having trouble generating your menu at the moment. "
+                     "Please try again later or contact support if the issue persists."
+            )
+            # Show main menu again
+            await show_main_menu(query.message, user_id, has_data, is_user_admin)
+        
+    elif user_choice == "enter_body_data" or user_choice == "update_info":
+        await query.edit_message_text(
+            "Let's collect your body data!"
+        )
+        # Create a fake update object with message for the start function
+        fake_update = Update(update.update_id + 1, message=query.message)
+        return await start(fake_update, context)
+        
+    elif user_choice == "view_stats":
+        if not is_user_admin:
+            await query.edit_message_text(
+                "❌ This option is for administrators only."
+            )
+            # Show main menu again
+            return await show_main_menu(query.message, user_id, has_data, is_user_admin)
+        
         if user_id not in user_data_store:
-            await update.message.reply_text(
-                "No data found. Please set up your information first with /start",
-                reply_markup=ReplyKeyboardRemove()
+            await query.edit_message_text(
+                "No data found. Please set up your information first."
             )
         else:
             user_data = user_data_store[user_id]
@@ -851,34 +887,64 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"BMR: {user_data.get('bmr', 'N/A')}\n"
                 f"TDEE: {user_data.get('tdee', 'N/A')}"
             )
-            await update.message.reply_text(
-                stats_message,
-                reply_markup=ReplyKeyboardRemove()
-            )
-            await show_navigation_options(update, context)
+            await query.edit_message_text(stats_message)
+        
+        # Show main menu again
+        await show_main_menu(query.message, user_id, has_data, is_user_admin)
             
-    elif user_choice == "❌ Clear My Data":
+    elif user_choice == "clear_data":
         if user_id in user_data_store:
             del user_data_store[user_id]
-            await update.message.reply_text(
-                "Your data has been cleared successfully!",
-                reply_markup=ReplyKeyboardRemove()
+            await query.edit_message_text(
+                "Your data has been cleared successfully!"
             )
+            has_data = False  # Update the flag
         else:
-            await update.message.reply_text(
-                "No data found to clear.",
-                reply_markup=ReplyKeyboardRemove()
+            await query.edit_message_text(
+                "No data found to clear."
             )
-        await show_navigation_options(update, context)
         
-    elif user_choice == "🏠 Main Menu":
-        await update.message.reply_text(
-            "Returning to main menu...",
-            reply_markup=ReplyKeyboardRemove()
+        # Show main menu again
+        await show_main_menu(query.message, user_id, has_data, is_user_admin)
+        
+    elif user_choice == "main_menu":
+        await query.edit_message_text(
+            "Returning to main menu..."
         )
-        return await start(update, context)
+        # Show the main menu
+        await show_main_menu(query.message, user_id, has_data, is_user_admin)
     
     return ConversationHandler.END
+
+
+async def show_main_menu(message, user_id, has_data=False, is_admin=False):
+    """Show the main menu with conditional options"""
+    keyboard = []
+    
+    # 1. Enter/Update body data
+    if has_data:
+        keyboard.append([InlineKeyboardButton("👌Update My Info", callback_data="update_info")])
+    else:
+        keyboard.append([InlineKeyboardButton("💪Enter My Body Data", callback_data="enter_body_data")])
+    
+    # 2. Generate menu (only if has data)
+    if has_data:
+        keyboard.append([InlineKeyboardButton("🍽️ Generate New Menu", callback_data="generate_menu")])
+    
+    # 3. View stats (only if admin)
+    if is_admin:
+        keyboard.append([InlineKeyboardButton("📊 View My Stats", callback_data="view_stats")])
+    
+    # 4. Clear data (only if has data)
+    if has_data:
+        keyboard.append([InlineKeyboardButton("❌ Clear My Data", callback_data="clear_data")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await message.reply_text(
+        "🏠 Main Menu - Please choose an option:",
+        reply_markup=reply_markup
+    )
 
 
 # Main function
@@ -890,14 +956,14 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, gender)],
+            GENDER: [CallbackQueryHandler(gender)],
             AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, age)],
             WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, weight)],
             HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, height)],
-            ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, activity)],
-            GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, goal)],
-            MENU_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_confirmation)],
-            TIP_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tip_amount)],
+            ACTIVITY: [CallbackQueryHandler(activity)],
+            GOAL: [CallbackQueryHandler(goal)],
+            MENU_CONFIRM: [CallbackQueryHandler(menu_confirmation)],
+            TIP_AMOUNT: [CallbackQueryHandler(handle_tip_amount)],
             TIP_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_tip)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
@@ -909,10 +975,11 @@ def main() -> None:
     application.add_handler(CommandHandler('clear_data', clear_data))
     
     # Add navigation handler
-    application.add_handler(MessageHandler(filters.Regex(
-        r'^(📋 Generate New Menu|🔄 Update My Info|📊 View My Stats|❌ Clear My Data|🏠 Main Menu)$'
-    ), handle_navigation))
-
+    application.add_handler(CallbackQueryHandler(
+        handle_navigation, 
+        pattern="^(generate_menu|update_info|enter_body_data|view_stats|clear_data|main_menu)$"
+    ))
+    
     # Add admin command handlers
     application.add_handler(CommandHandler('stats', admin_stats))
     application.add_handler(CommandHandler('broadcast', broadcast))
